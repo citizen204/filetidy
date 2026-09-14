@@ -56,6 +56,18 @@ def launcher() -> List[str]:
     access -- would silently schedule a different interpreter than the one the
     user then grants.
     """
+    interpreter = str(Path(sys.executable).resolve())
+
+    if sys.platform == "darwin":
+        # Call the interpreter directly rather than the console script. pip
+        # writes that script with a `#!/bin/sh` wrapper when the install path
+        # is long (a virtualenv under "Application Support" easily is), so
+        # launchd would spawn /bin/sh, which then execs python. That makes the
+        # process macOS attributes disk access to ambiguous -- and /bin/sh is
+        # the last binary anyone should grant Full Disk Access to. Spawning the
+        # interpreter itself keeps the grant on exactly one private binary.
+        return [interpreter, "-m", "filetidy"]
+
     invoked = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
     if invoked and invoked.name in ("filetidy", "filetidy.exe") and invoked.exists():
         return [str(invoked.resolve())]
@@ -64,8 +76,7 @@ def launcher() -> List[str]:
     if script:
         return [str(Path(script).resolve())]
 
-    # Running as `python -m filetidy`: keep using this interpreter.
-    return [str(Path(sys.executable).resolve()), "-m", "filetidy"]
+    return [interpreter, "-m", "filetidy"]
 
 
 def command_for(spec: ServiceSpec) -> List[str]:

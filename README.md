@@ -202,24 +202,40 @@ The log lands in `~/Library/Logs/filetidy/` (macOS), `%LOCALAPPDATA%\filetidy\`
 (Windows) or `~/.local/state/filetidy/` (Linux), and stays quiet on runs where
 nothing moved.
 
-### macOS: grant the permission first
+### macOS: which Python runs the service matters
 
 `~/Desktop`, `~/Documents` and `~/Downloads` are protected by macOS privacy
-controls (TCC). A background agent cannot show a permission prompt, so the very
-first scheduled run is simply refused:
+controls (TCC), and a background agent cannot put a permission prompt on
+screen. If the scheduled run is refused you will see this in the log, rather
+than a silent no-op:
 
 ```
 !! cannot read /Users/you/Downloads: Operation not permitted
 ```
 
-Grant access to the interpreter that runs filetidy under
-**System Settings → Privacy & Security → Full Disk Access**. `filetidy service
-install` prints the exact executable path. This is a real trade-off: Full Disk
-Access on a shared Python interpreter also covers every other script that
-interpreter runs.
+Apple's bundled interpreter at
+`/Library/Developer/CommandLineTools/usr/bin/python3` is the usual cause — the
+system Python is restricted in a launchd agent. Installing filetidy into its
+own virtualenv built from a Homebrew (or python.org) interpreter avoids it:
 
-Nothing about this is specific to filetidy — any scheduled tool that touches
-those three folders needs the same grant.
+```bash
+brew install python
+python3 -m venv --copies ~/Library/Application\ Support/filetidy/venv
+~/Library/Application\ Support/filetidy/venv/bin/pip install filetidy
+~/Library/Application\ Support/filetidy/venv/bin/filetidy service install ~/Downloads ~/Desktop
+```
+
+`--copies` matters: a symlinked virtualenv resolves back to the shared
+interpreter, so any disk-access grant would land on that instead of on a
+binary only filetidy uses. (Apple's python cannot build a `--copies`
+virtualenv at all, which is the other reason to use Homebrew's.)
+
+If a run is still refused, grant access to the interpreter the install command
+printed under **System Settings → Privacy & Security → Full Disk Access**.
+On macOS the service deliberately schedules that interpreter directly rather
+than pip's console script: pip writes the script with a `#!/bin/sh` wrapper
+when the install path is long, which would make launchd spawn `/bin/sh` and
+blur which binary the grant belongs to.
 
 ## Development
 
@@ -229,7 +245,7 @@ cd filetidy
 python -m unittest discover -s tests -t . -v
 ```
 
-92 tests, no dependencies. CI runs them on Ubuntu, macOS and Windows.
+93 tests, no dependencies. CI runs them on Ubuntu, macOS and Windows.
 
 ---
 

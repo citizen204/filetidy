@@ -1,5 +1,11 @@
 import os
 import plistlib
+import sys
+
+
+def sys_platform():
+    return sys.platform
+
 import subprocess
 import unittest
 from pathlib import Path
@@ -45,12 +51,18 @@ class CommandTests(unittest.TestCase):
         # A scheduler has no PATH to speak of, so a bare "filetidy" would fail.
         self.assertTrue(Path(argv[0]).is_absolute(), argv)
 
-    def test_launcher_prefers_the_invoked_script(self):
-        # Registering from a dedicated virtualenv must schedule *that* copy:
-        # on macOS the interpreter is what gets granted disk access, so
-        # scheduling a different one silently defeats the grant.
-        import sys
+    @unittest.skipUnless(sys_platform() == "darwin", "macOS-specific TCC behaviour")
+    def test_launcher_avoids_the_shell_wrapper_on_macos(self):
+        # pip's console script starts with #!/bin/sh when the install path is
+        # long, so scheduling it would make launchd spawn /bin/sh. Disk access
+        # must be attributable to one private interpreter, never to /bin/sh.
+        argv = service.launcher()
+        self.assertEqual(argv[1:], ["-m", "filetidy"])
+        self.assertNotIn("/bin/sh", argv[0])
 
+    @unittest.skipIf(sys_platform() == "darwin", "macOS always uses the interpreter")
+    def test_launcher_prefers_the_invoked_script(self):
+        # Registering from a dedicated virtualenv must schedule *that* copy.
         fake = Path(self.tmp) / "filetidy"
         fake.write_text("#!/bin/sh\n", encoding="utf-8")
         original = sys.argv
