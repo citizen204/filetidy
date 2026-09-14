@@ -19,6 +19,12 @@ def spec(**overrides):
 
 
 class CommandTests(unittest.TestCase):
+    def setUp(self):
+        import shutil as _shutil
+        import tempfile
+        self.tmp = tempfile.mkdtemp()
+        self.addCleanup(_shutil.rmtree, self.tmp, True)
+
     def test_command_runs_apply_and_quiet(self):
         argv = service.command_for(spec())
         self.assertIn("run", argv)
@@ -38,6 +44,32 @@ class CommandTests(unittest.TestCase):
         self.assertTrue(argv)
         # A scheduler has no PATH to speak of, so a bare "filetidy" would fail.
         self.assertTrue(Path(argv[0]).is_absolute(), argv)
+
+    def test_launcher_prefers_the_invoked_script(self):
+        # Registering from a dedicated virtualenv must schedule *that* copy:
+        # on macOS the interpreter is what gets granted disk access, so
+        # scheduling a different one silently defeats the grant.
+        import sys
+
+        fake = Path(self.tmp) / "filetidy"
+        fake.write_text("#!/bin/sh\n", encoding="utf-8")
+        original = sys.argv
+        sys.argv = [str(fake), "service", "install"]
+        try:
+            self.assertEqual(service.launcher(), [str(fake.resolve())])
+        finally:
+            sys.argv = original
+
+    def test_launcher_falls_back_when_not_invoked_as_the_script(self):
+        import sys
+
+        original = sys.argv
+        sys.argv = ["/somewhere/pytest", "-x"]
+        try:
+            argv = service.launcher()
+            self.assertTrue(Path(argv[0]).is_absolute())
+        finally:
+            sys.argv = original
 
     def test_label_is_namespaced(self):
         self.assertEqual(spec().label, "com.filetidy.autotidy")

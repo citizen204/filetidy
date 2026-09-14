@@ -49,15 +49,23 @@ class Outcome(NamedTuple):
 def launcher() -> List[str]:
     """How to invoke filetidy from a scheduler.
 
-    The console script is preferred because it reads clearly in logs and task
-    definitions, but it only exists if the package was installed with pip and
-    its bin directory is discoverable. Running the module through the current
-    interpreter always works, so that is the fallback.
+    The installation doing the registering is the one that gets registered.
+    Resolving through PATH instead would pick whichever filetidy happens to
+    come first, so installing from a dedicated virtualenv -- the reason to
+    have one at all on macOS, where the interpreter is what gets granted disk
+    access -- would silently schedule a different interpreter than the one the
+    user then grants.
     """
+    invoked = Path(sys.argv[0]) if sys.argv and sys.argv[0] else None
+    if invoked and invoked.name in ("filetidy", "filetidy.exe") and invoked.exists():
+        return [str(invoked.resolve())]
+
     script = shutil.which("filetidy")
     if script:
-        return [script]
-    return [sys.executable, "-m", "filetidy"]
+        return [str(Path(script).resolve())]
+
+    # Running as `python -m filetidy`: keep using this interpreter.
+    return [str(Path(sys.executable).resolve()), "-m", "filetidy"]
 
 
 def command_for(spec: ServiceSpec) -> List[str]:
