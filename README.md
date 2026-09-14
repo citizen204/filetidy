@@ -1,5 +1,10 @@
 # filetidy
 
+[![tests](https://github.com/citizen204/filetidy/actions/workflows/tests.yml/badge.svg)](https://github.com/citizen204/filetidy/actions/workflows/tests.yml)
+![python](https://img.shields.io/badge/python-3.8%2B-blue)
+![platforms](https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux-lightgrey)
+![license](https://img.shields.io/badge/license-MIT-green)
+
 Sort loose files into folders by type — identically on macOS, Windows and Linux.
 
 Point it at a cluttered Desktop or Downloads folder and it files everything into
