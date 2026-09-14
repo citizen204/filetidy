@@ -191,7 +191,7 @@ cd filetidy
 python -m unittest discover -s tests -t . -v
 ```
 
-66 tests, no dependencies. CI runs them on Ubuntu, macOS and Windows.
+69 tests, no dependencies. CI runs them on Ubuntu, macOS and Windows.
 
 ---
 

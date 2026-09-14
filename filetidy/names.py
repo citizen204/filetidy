@@ -51,18 +51,21 @@ def _strip_control_chars(text: str) -> str:
     return "".join(ch for ch in text if unicodedata.category(ch) != "Cc")
 
 
-def _collapse_unicode_spaces(text: str) -> str:
-    """Turn every unicode space into a plain space and collapse runs.
+def _normalise_spaces(text: str) -> str:
+    """Turn every exotic unicode space into a plain ASCII space.
 
     U+202F (narrow no-break space) in macOS screenshot names and U+00A0 from
     pasted web content both look identical to a normal space but compare
     unequal, which makes shell globs and scripts silently miss files.
+
+    Runs of spaces are deliberately *not* collapsed: two spaces in a row are
+    legal on every platform, so squeezing them would rename a file that has
+    nothing wrong with it.
     """
-    swapped = "".join(
+    return "".join(
         " " if unicodedata.category(ch) == "Zs" else ch
         for ch in text
     )
-    return " ".join(swapped.split())
 
 
 def is_portable(name: str) -> bool:
@@ -105,7 +108,7 @@ def safe_name(name: str, replacement: str = REPLACEMENT) -> str:
     """
     text = unicodedata.normalize("NFC", name)
     text = _strip_control_chars(text)
-    text = _collapse_unicode_spaces(text)
+    text = _normalise_spaces(text)
     text = "".join(replacement if ch in WINDOWS_RESERVED_CHARS else ch for ch in text)
 
     # Windows silently drops trailing dots and spaces, which turns

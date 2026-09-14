@@ -50,6 +50,32 @@ class SafeNameTests(unittest.TestCase):
         result.encode("utf-8").decode("utf-8")
         self.assertTrue(result.endswith(".txt"))
 
+    def test_runs_of_plain_spaces_are_left_alone(self):
+        # Two spaces in a row are legal everywhere. Collapsing them would
+        # rename a file that has nothing wrong with it -- and `diagnose` would
+        # have no reason to show for the change.
+        self.assertEqual(safe_name("4.3 PT  IPv6 Discovery.pka"), "4.3 PT  IPv6 Discovery.pka")
+        self.assertTrue(is_portable("a  b.txt"))
+
+    def test_exotic_space_swapped_without_collapsing_neighbours(self):
+        self.assertEqual(safe_name("a\u00a0 b.txt"), "a  b.txt")
+
+    def test_every_unportable_name_has_a_stated_reason(self):
+        # An empty diagnosis next to a proposed rename reads like a bug, so the
+        # two must never disagree.
+        names = [
+            "rent:bills.xlsx",
+            "Screenshot 2026-04-13 at 8.50.27\u202fam.png",
+            "trailing ",
+            "CON.txt",
+            "bad\x07name.txt",
+            "a/b.txt",
+            "\u4e2d\u6587" * 200 + ".txt",
+        ]
+        for name in names:
+            if not is_portable(name):
+                self.assertTrue(diagnose(name), "no reason given for %r" % name)
+
     def test_idempotent(self):
         for name in ("rent:bills.xlsx", "CON.txt", "a/b.txt", "trailing. "):
             once = safe_name(name)
