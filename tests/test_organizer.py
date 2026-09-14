@@ -133,7 +133,22 @@ class CollisionTests(OrganizerTestCase):
 
 
 class SanitizeTests(OrganizerTestCase):
-    def test_names_are_fixed_while_filing(self):
+    def test_narrow_no_break_space_is_normalised(self):
+        # U+202F is a legal filename character on every platform, so unlike the
+        # colon below this case can actually run everywhere.
+        touch(self.root / "Screenshot 2026-05-22 at 1.32.23\u202fpm.png")
+        organizer = Organizer(sanitize_names=True)
+        organizer.apply(organizer.plan(self.root))
+        self.assertEqual(
+            self.names_under("_Archive", "Screenshots"),
+            ["Screenshot 2026-05-22 at 1.32.23 pm.png"],
+        )
+
+    @unittest.skipIf(os.name == "nt", "Windows cannot create a file with ':' in the name")
+    def test_windows_illegal_character_is_fixed_while_filing(self):
+        # A name like this is created on macOS and only becomes a problem once
+        # the file travels to Windows -- which is why the fix belongs here and
+        # the test cannot run on Windows itself.
         touch(self.root / "rent:bills.xlsx")
         organizer = Organizer(sanitize_names=True)
         organizer.apply(organizer.plan(self.root))
