@@ -72,6 +72,7 @@ Desktop/
 | `filetidy watch PATH` | Keep a folder tidy continuously — files get sorted as they land. |
 | `filetidy rules` | Print which extension maps to which folder. |
 | `filetidy doctor PATH` | Find filenames that break on another OS. `--fix` renames them. |
+| `filetidy service install PATH...` | Run filetidy automatically from now on. `status` / `uninstall` manage it. |
 | `filetidy init` | Write a starter config file. |
 
 ### Useful options for `run` and `watch`
@@ -172,16 +173,53 @@ Run `filetidy rules` to see the resulting map.
 
 ## Keeping a folder tidy automatically
 
+For the length of a terminal session:
+
 ```bash
 filetidy watch ~/Downloads --apply
 ```
 
-It polls every 30 seconds (`--interval`), and the `--min-age` window means a
-file is only filed once the browser has finished writing it.
+To have it run by itself from now on, `service install` registers filetidy with
+whatever scheduler the OS already has — launchd on macOS, Scheduled Tasks on
+Windows, a systemd user timer on Linux:
 
-To run it in the background at login, use the scheduler your OS already has:
-`launchd` on macOS, Task Scheduler on Windows, a systemd user timer or a cron
-entry on Linux.
+```bash
+filetidy service install ~/Downloads ~/Desktop
+filetidy service status
+filetidy service uninstall
+```
+
+It runs one short command on a timer rather than keeping a process resident, so
+a crash cannot leave the folder unattended — the next tick just runs again.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--interval` | 300 | seconds between checks |
+| `--min-age` | 600 | how long a new file is left alone before being filed |
+| `--name` | `autotidy` | lets several services coexist |
+
+The log lands in `~/Library/Logs/filetidy/` (macOS), `%LOCALAPPDATA%\filetidy\`
+(Windows) or `~/.local/state/filetidy/` (Linux), and stays quiet on runs where
+nothing moved.
+
+### macOS: grant the permission first
+
+`~/Desktop`, `~/Documents` and `~/Downloads` are protected by macOS privacy
+controls (TCC). A background agent cannot show a permission prompt, so the very
+first scheduled run is simply refused:
+
+```
+!! cannot read /Users/you/Downloads: Operation not permitted
+```
+
+Grant access to the interpreter that runs filetidy under
+**System Settings → Privacy & Security → Full Disk Access**. `filetidy service
+install` prints the exact executable path. This is a real trade-off: Full Disk
+Access on a shared Python interpreter also covers every other script that
+interpreter runs.
+
+Nothing about this is specific to filetidy — any scheduled tool that touches
+those three folders needs the same grant.
 
 ## Development
 
@@ -191,7 +229,7 @@ cd filetidy
 python -m unittest discover -s tests -t . -v
 ```
 
-69 tests, no dependencies. CI runs them on Ubuntu, macOS and Windows.
+90 tests, no dependencies. CI runs them on Ubuntu, macOS and Windows.
 
 ---
 

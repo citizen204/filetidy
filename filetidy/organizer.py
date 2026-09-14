@@ -83,7 +83,12 @@ class Organizer:
 
     def _iter_candidates(self, root: Path, archive_root: Path) -> Iterable[Path]:
         if self.recursive:
-            for dirpath, dirnames, filenames in os.walk(str(root)):
+            def on_error(exc: OSError) -> None:
+                # os.walk swallows errors by default. A folder we were asked to
+                # organise but cannot read is a failure, not an empty folder.
+                raise exc
+
+            for dirpath, dirnames, filenames in os.walk(str(root), onerror=on_error):
                 current = Path(dirpath)
                 # Never descend into the archive we are filling, and skip
                 # hidden / package directories unless explicitly asked.
@@ -96,11 +101,11 @@ class Organizer:
                 for filename in filenames:
                     yield current / filename
         else:
-            try:
-                entries = sorted(root.iterdir())
-            except OSError:
-                return
-            for entry in entries:
+            # Deliberately not wrapped in try/except: a permission error here
+            # used to be swallowed, which made "macOS denied access to this
+            # folder" look exactly like "this folder is empty" -- a silent
+            # no-op with a zero exit status.
+            for entry in sorted(root.iterdir()):
                 if entry.is_file() or entry.is_symlink():
                     yield entry
 

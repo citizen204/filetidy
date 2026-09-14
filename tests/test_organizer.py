@@ -106,6 +106,36 @@ class PlanTests(OrganizerTestCase):
         self.assertEqual([m.source.name for m in plan.moves], ["keep.pdf"])
 
 
+class UnreadableDirectoryTests(OrganizerTestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits do not apply")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores permissions")
+    def test_permission_error_is_raised_not_swallowed(self):
+        # Swallowing this made a folder macOS refused to let us read look
+        # exactly like an empty one: no moves, no error, exit status 0.
+        locked = self.root / "locked"
+        locked.mkdir()
+        touch(locked / "a.pdf")
+        os.chmod(str(locked), 0o000)
+        try:
+            with self.assertRaises(OSError):
+                Organizer().plan(locked)
+        finally:
+            os.chmod(str(locked), 0o755)
+
+    @unittest.skipIf(os.name == "nt", "POSIX permission bits do not apply")
+    @unittest.skipIf(hasattr(os, "geteuid") and os.geteuid() == 0, "root ignores permissions")
+    def test_recursive_walk_also_raises(self):
+        locked = self.root / "locked"
+        locked.mkdir()
+        touch(locked / "a.pdf")
+        os.chmod(str(locked), 0o000)
+        try:
+            with self.assertRaises(OSError):
+                Organizer(recursive=True).plan(locked)
+        finally:
+            os.chmod(str(locked), 0o755)
+
+
 class CollisionTests(OrganizerTestCase):
     def test_existing_destination_gets_a_suffix(self):
         touch(self.root / "_Archive" / "PDF" / "a.pdf", content="old")

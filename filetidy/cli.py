@@ -14,6 +14,7 @@ from .journal import Journal
 from .names import diagnose, safe_name
 from .organizer import Organizer, Plan, find_unportable, undo as undo_moves, unique_destination
 from .rules import Ruleset
+from . import service as service_mod
 
 # ---------------------------------------------------------------------------
 # Output helpers
@@ -154,44 +155,81 @@ def print_plan(plan: Plan, root: Path, verbose: bool) -> None:
 # ---------------------------------------------------------------------------
 
 def cmd_run(args: argparse.Namespace) -> int:
-    root = Path(args.path).expanduser()
-    if not root.is_dir():
-        print(red("Not a directory: %s" % root), file=sys.stderr)
+    roots = [Path(p).expanduser() for p in (args.paths or ["."])]
+    missing = [r for r in roots if not r.is_dir()]
+    if missing:
+        for root in missing:
+            print(red("Not a directory: %s" % root), file=sys.stderr)
         return 2
 
-    organizer = build_organizer(args, root)
-    plan = organizer.plan(root)
+    # In quiet mode nothing is printed unless something actually happened, so
+    # a service running every few minutes does not fill a log with "nothing
+    # to do".
+    quiet = getattr(args, "quiet", False)
+    exit_code = 0
 
-    mode = bold(green("APPLY")) if args.apply else bold(yellow("DRY RUN"))
-    print("%s  %s" % (mode, root))
-    print()
-    print_plan(plan, root.resolve(), args.verbose)
+    for root in roots:
+        organizer = build_organizer(args, root)
+        try:
+            plan = organizer.plan(root)
+        except OSError as exc:
+            print("%s cannot read %s: %s" % (red("!!"), root, exc.strerror or exc),
+                  file=sys.stderr)
+            if sys.platform == "darwin" and getattr(exc, "errno", None) in (1, 13):
+                print(dim("   macOS privacy protection blocks this. Grant access in"),
+                      file=sys.stderr)
+                print(dim("   System Settings > Privacy & Security > Full Disk Access."),
+                      file=sys.stderr)
+            exit_code = 2
+            continue
 
-    if not plan.moves:
-        return 0
+        if quiet and not plan.moves:
+            continue
 
-    print()
-    if not args.apply:
-        print("  %d file%s would move (%s). Re-run with %s to do it." % (
-            len(plan.moves),
-            "" if len(plan.moves) == 1 else "s",
-            human_size(plan.total_bytes),
-            bold("--apply"),
-        ))
-        return 0
+        if not quiet:
+            mode = bold(green("APPLY")) if args.apply else bold(yellow("DRY RUN"))
+            print("%s  %s" % (mode, root))
+            print()
+            print_plan(plan, root.resolve(), args.verbose)
 
-    journal = None if args.no_journal else Journal()
-    result = organizer.apply(plan, journal=journal)
-    print("  %s %d file%s moved." % (
-        green("OK"), len(result.moved), "" if len(result.moved) == 1 else "s",
-    ))
-    if result.failed:
-        print("  %s %d failed:" % (red("!!"), len(result.failed)))
-        for failure in result.failed:
-            print("      %s  (%s)" % (failure.source.name, failure.reason))
-    if journal and result.session_id:
-        print(dim("  Undo with:  filetidy undo"))
-    return 1 if result.failed else 0
+        if not plan.moves:
+            if not quiet:
+                print()
+            continue
+
+        if not args.apply:
+            print()
+            print("  %d file%s would move (%s). Re-run with %s to do it." % (
+                len(plan.moves),
+                "" if len(plan.moves) == 1 else "s",
+                human_size(plan.total_bytes),
+                bold("--apply"),
+            ))
+            continue
+
+        journal = None if args.no_journal else Journal()
+        result = organizer.apply(plan, journal=journal)
+
+        if quiet:
+            print("%s  %s  %d file%s filed" % (
+                time.strftime("%Y-%m-%d %H:%M:%S"), root,
+                len(result.moved), "" if len(result.moved) == 1 else "s",
+            ))
+        else:
+            print()
+            print("  %s %d file%s moved." % (
+                green("OK"), len(result.moved), "" if len(result.moved) == 1 else "s",
+            ))
+        if result.failed:
+            exit_code = 1
+            print("  %s %d failed:" % (red("!!"), len(result.failed)))
+            for failure in result.failed:
+                print("      %s  (%s)" % (failure.source.name, failure.reason))
+        if journal and result.session_id and not quiet:
+            print(dim("  Undo with:  filetidy undo"))
+        sys.stdout.flush()
+
+    return exit_code
 
 
 def cmd_undo(args: argparse.Namespace) -> int:
@@ -343,6 +381,61 @@ def cmd_init(args: argparse.Namespace) -> int:
 # Parser
 # ---------------------------------------------------------------------------
 
+def cmd_service(args: argparse.Namespace) -> int:
+    action = args.action
+    name = args.name
+
+    if action == "status":
+        outcome = service_mod.status(name)
+        mark = green("running") if outcome.ok else yellow(outcome.message)
+        print("  %-10s %s" % (bold(name), mark))
+        if outcome.path:
+            print(dim("  config: %s" % outcome.path))
+        print(dim("  log:    %s" % service_mod.log_path(name)))
+        return 0 if outcome.ok else 1
+
+    if action == "uninstall":
+        outcome = service_mod.uninstall(name)
+        print("  %s %s" % (green("OK") if outcome.ok else red("!!"), outcome.message))
+        return 0 if outcome.ok else 1
+
+    # install
+    paths = service_mod.normalise_paths(args.paths or [])
+    if not paths:
+        print(red("Give at least one folder to watch."), file=sys.stderr)
+        return 2
+    missing = [p for p in paths if not Path(p).is_dir()]
+    if missing:
+        for path in missing:
+            print(red("Not a directory: %s" % path), file=sys.stderr)
+        return 2
+
+    spec = service_mod.ServiceSpec(
+        name=name,
+        paths=paths,
+        interval=args.interval,
+        min_age=args.min_age,
+    )
+    outcome = service_mod.install(spec)
+    if not outcome.ok:
+        print("  %s %s" % (red("!!"), outcome.message), file=sys.stderr)
+        return 1
+
+    print("%s on %s" % (bold(green("Installed")), service_mod.platform_name()))
+    print()
+    for path in paths:
+        print("  watching  %s" % path)
+    print("  every     %d seconds" % spec.interval)
+    print("  delay     %d seconds before a new file is filed" % spec.min_age)
+    print("  command   %s" % " ".join(service_mod.command_for(spec)))
+    if outcome.path:
+        print("  config    %s" % outcome.path)
+    print("  log       %s" % service_mod.log_path(name))
+    print()
+    print(dim("  Stop it with:  filetidy service uninstall"))
+    return 0
+
+
 def add_common_options(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--config", help="path to a config file")
     parser.add_argument("--archive", help="name of the destination folder (default: _Archive)")
@@ -371,9 +464,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command")
 
     run = subparsers.add_parser("run", help="organise a folder (dry run unless --apply)")
-    run.add_argument("path", nargs="?", default=".", help="folder to organise (default: .)")
+    run.add_argument("paths", nargs="*", default=["."], metavar="PATH",
+                     help="folder(s) to organise (default: .)")
     run.add_argument("--apply", action="store_true", help="actually move the files")
     run.add_argument("-v", "--verbose", action="store_true", help="list every file")
+    run.add_argument("-q", "--quiet", action="store_true",
+                     help="print only when files were actually moved")
     add_common_options(run)
     run.set_defaults(func=cmd_run)
 
@@ -399,6 +495,20 @@ def build_parser() -> argparse.ArgumentParser:
     doctor.add_argument("--no-recursive", action="store_true", help="check only the top level")
     doctor.add_argument("--no-journal", action="store_true", help="do not record renames")
     doctor.set_defaults(func=cmd_doctor)
+
+    service = subparsers.add_parser(
+        "service", help="run filetidy automatically in the background")
+    service.add_argument("action", choices=["install", "uninstall", "status"])
+    service.add_argument("paths", nargs="*", metavar="PATH",
+                         help="folder(s) to keep tidy (install only)")
+    service.add_argument("--name", default=service_mod.DEFAULT_NAME,
+                         help="service name, so several can coexist (default: autotidy)")
+    service.add_argument("--interval", type=int, default=service_mod.DEFAULT_INTERVAL,
+                         metavar="SECONDS", help="how often to check (default: 300)")
+    service.add_argument("--min-age", type=int, default=service_mod.DEFAULT_MIN_AGE,
+                         metavar="SECONDS",
+                         help="leave a new file alone for this long (default: 600)")
+    service.set_defaults(func=cmd_service)
 
     init = subparsers.add_parser("init", help="write a starter config file")
     init.add_argument("--user", action="store_true", help="write to the per-user config location")
